@@ -1,0 +1,248 @@
+import java.util.ArrayList;
+import java.util.List;
+
+public class IcyTerrain {
+    private List<List<List<ITerrainObject>>> grid;
+    // Each cell is a List<IterainObject> because multiple objects can temporarily occupy the same space.
+    // those Lists of individual cells are contained in a List that represents the columns; List<List<IterrainObject>>
+    // column list is contained in the List that represents row; -> List<List<List<ITerrainObject>>>
+    // and row lists are contained in grid List<List<List<ITerrainObject>>> = grid;
+
+    public IcyTerrain() {
+        grid = new ArrayList<>();
+        for(int i=0; i<10; i++) {
+            List<List<ITerrainObject>> row = new ArrayList<>();
+            
+            for(int j=0;j<10;j++) {
+                row.add(new ArrayList<>()); //Empty Cell
+            }
+            grid.add(row);
+        }
+    }
+
+    public List<ITerrainObject> getObjectsAt(Position position) {
+        if(!position.isValid()) {
+            return new ArrayList<>();
+        }
+        return grid.get(position.getRow()).get(position.getCol());
+    }
+
+    public void addObject(ITerrainObject objectToAdd, Position position) {
+        if (position.isValid()) {
+            grid.get(position.getRow()).get(position.getCol()).add(objectToAdd);
+            objectToAdd.setPosition(position);
+        }
+    }
+
+    public void removeObject(ITerrainObject objectToRemove) {
+        if (objectToRemove == null) { return; }
+        Position pos = objectToRemove.getPosition();
+        if (pos.isValid()) {
+            grid.get(pos.getRow()).get(pos.getCol()).remove(objectToRemove);  
+        }
+    }
+    public boolean isEmpty(Position pos) {
+        return pos.isValid() && getObjectsAt(pos).isEmpty();
+    }
+    //Movement of Objects
+    public void moveOneSquare(Penguin penguin, Direction dir) {
+        Position current = penguin.getPosition();
+        Position next = current.getNextPosition(dir);
+        
+        removeObject(penguin);
+        
+        if (!next.isValid()) {
+            penguin.setRemoved(true);
+            return;
+        }
+        
+        addObject(penguin, next);
+        handlePositionInteractions(next);
+    }
+
+    public void slideWithStop(Penguin penguin, Direction dir, int stopAtSquare) {
+        Position current = penguin.getPosition();
+        removeObject(penguin);
+        int squaresMoved = 0;
+
+        while (true) { 
+            Position next = current.getNextPosition(dir);
+
+            if(!(next.isValid())) {
+                penguin.setRemoved(true);
+                return;
+            }
+
+            List<ITerrainObject> objectsAtNext = getObjectsAt(next);
+
+            if (objectsAtNext.isEmpty()) {
+                current = next;
+                squaresMoved++;
+
+                if (squaresMoved == stopAtSquare) {
+                    addObject(penguin, current);
+                    handlePositionInteractions(current);
+                    return;
+                }
+            } else {
+                addObject(penguin,current);
+                handleCollision(penguin, objectsAtNext.get(0), dir, current); {
+                    return;
+                }
+
+            }
+
+        }
+
+    }
+
+    public void slide(ITerrainObject slider, Direction dir) {
+        Position current = slider.getPosition();
+        removeObject(slider);
+
+        boolean canJump = false;
+
+        if (slider instanceof RockhopperPenguin) {
+            RockhopperPenguin rp = (RockhopperPenguin) slider;
+            canJump = rp.isPreparedToJump();
+
+        }
+
+        while (true) { 
+            Position next = current.getNextPosition(dir);
+            
+            if (!(next.isValid())) {
+                if (slider instanceof Penguin) {
+                    ((Penguin) slider).setRemoved(true);
+                }
+                return;
+            }
+
+            List<ITerrainObject> objectsAtNext = getObjectsAt(next);
+
+            if (objectsAtNext.isEmpty()) {
+                current = next;
+
+            } else {// if next tile is not empty: 
+                ITerrainObject blocker = objectsAtNext.get(0);
+
+                // we do the necessary adjustments if sliding object is RockhopperPenguin and is Capable of Jumping
+                if (canJump && blocker instanceof IHazard && !(blocker instanceof HoleInIce)) {
+                    Position jumpTo = next.getNextPosition(dir);
+                    if(jumpTo.isValid() && isEmpty(next)) {
+                        current = jumpTo;
+                        canJump = false;
+                        ((RockhopperPenguin)slider).setPreparedToJump(false);
+                        continue;
+                    }
+                    else {
+                        canJump = false;
+                        ((RockhopperPenguin)slider).setPreparedToJump(false);
+
+                    }
+                }
+                addObject(slider, current);
+                handleCollision(slider, blocker, dir, current);
+                return;
+            }
+            
+        }
+    }
+
+    private void handleCollision(ITerrainObject slider, ITerrainObject blocker, Direction dir, Position sliderPos) {
+        if (slider instanceof Penguin && blocker instanceof Food) {
+            Penguin p = (Penguin) slider;
+            Food f = (Food) blocker;
+            p.collectFood(f);
+            removeObject(f);
+            return;
+        }
+
+        if (slider instanceof Penguin && blocker instanceof Penguin) {
+            slide(blocker, dir);
+            return;
+        }
+        
+        if (slider instanceof ISlidable && blocker instanceof Food) {
+            removeObject(blocker);
+            removeObject(slider);
+            slide(slider, dir);
+            return;
+        }
+
+        //From Homework: In rare cases where a sliding hazard collides into another penguin that the current turn doesn't belong to, the sliding hazard is stopped in its tracks while the other penguin is unaffected.
+        if ((slider instanceof LightIceBlock || slider instanceof SeaLion) && blocker instanceof Penguin ) {
+            return; 
+
+        }
+
+        if (blocker instanceof IHazard) {
+            CollisionResult result = ((IHazard) blocker).handleCollision(slider, this, dir);
+            if (result.transferMovement && result.newSlider != null) {
+                removeObject(result.newSlider);
+                slide(result.newSlider, result.newDirection);
+            }
+        }
+    }
+
+    private void handlePositionInteractions(Position pos) {
+        List<ITerrainObject> objects = getObjectsAt(pos);
+        
+        Penguin penguin = null;
+        List<Food> foodItems = new ArrayList<>();
+        
+        for (ITerrainObject obj : objects) {
+            if (obj instanceof Penguin) {
+                penguin = (Penguin) obj;
+            } else if (obj instanceof Food) {
+                foodItems.add((Food) obj);
+            }
+        }
+        
+        if (penguin != null) {
+            for (Food food : foodItems) {
+                penguin.collectFood(food);
+                removeObject(food);
+            }
+        }
+    }
+
+    public void displayGrid() {
+        System.out.println("-------------------------------------------------------------");
+        for (int row = 0; row < 10; row++) {
+            System.out.print("|");
+            for (int col = 0; col < 10; col++) {
+                Position pos = new Position(row, col);
+                List<ITerrainObject> objects = getObjectsAt(pos);
+                
+                if (objects.isEmpty()) {
+                    System.out.print("    |");
+                } else {
+                    ITerrainObject toDisplay = getPriorityObject(objects);
+                    String symbol = toDisplay.getDisplaySymbol();
+                    int padding = (4 - symbol.length()) / 2;
+                    String paddedSymbol = " ".repeat(padding) + symbol + 
+                                         " ".repeat(4 - symbol.length() - padding);
+                    System.out.print(paddedSymbol + "|");
+                }
+            }
+            System.out.println();
+            System.out.println("-------------------------------------------------------------");
+        }
+    }
+
+    private ITerrainObject getPriorityObject(List<ITerrainObject> objects) {
+        for (ITerrainObject obj : objects) {
+            if (obj instanceof Penguin) { 
+                return obj; 
+            }
+        }
+        for (ITerrainObject obj : objects) {
+            if (obj instanceof IHazard) { 
+                return obj;
+            }    
+        }
+        return objects.get(0);
+    }   
+
+}
